@@ -4,6 +4,7 @@ namespace App\Console\Commands;
 
 use Illuminate\Console\Command;
 use Illuminate\Support\Facades\Http;
+use Illuminate\Support\Facades\Storage;
 use Symfony\Component\DomCrawler\Crawler;
 
 class MutGGThemeTeam extends Command
@@ -18,31 +19,31 @@ class MutGGThemeTeam extends Command
         'seahawks' => '6280',
         'eagles' => '6130',
         'patriots' => '6220',
-        'chiefs' => '6090',
+        //        'chiefs' => '6090',
     ];
 
     private const array POSITIONS = [
-        1 => 'QB',
-        2 => 'HB',
-        3 => 'FB',
-        4 => 'WR',
-        5 => 'TE',
-        6 => 'LT',
-        7 => 'LG',
-        8 => 'C',
-        9 => 'RG',
-        10 => 'RT',
-        11 => 'LE',
-        12 => 'RE',
-        13 => 'DT',
-        14 => 'LOLB',
-        15 => 'MLB',
-        16 => 'ROLB',
-        17 => 'CB',
-        18 => 'FS',
-        19 => 'SS',
-        20 => 'K',
-        21 => 'P',
+        1 => 2, // QB
+        2 => 3, // HB
+        3 => 2, // FB
+        4 => 5, // WR
+        5 => 3, // TE
+        6 => 2, // LT
+        7 => 2, // LG
+        8 => 2, // C
+        9 => 2, // RG
+        10 => 2, // RT
+        11 => 2, // LE
+        12 => 2, // RE
+        13 => 4, // DT
+        14 => 2, // LOLB
+        15 => 4, // MLB
+        16 => 2, // ROLB
+        17 => 5, // CB
+        18 => 2, // FS
+        19 => 2, // SS
+        20 => 1, // K
+        21 => 1, // P
     ];
 
     /**
@@ -68,14 +69,13 @@ class MutGGThemeTeam extends Command
         $coreData = Http::get(self::API_URL.'/core-data')->json()['data'];
         $pages = [];
         foreach (self::CHEMS as $teamName => $chemId) {
-            foreach (self::POSITIONS as $position => $positionName) {
+            foreach (array_keys(self::POSITIONS) as $position) {
                 for ($page = 1; $page < 2; $page++) {
                     $pages[] = [
                         'chemistry' => "{$chemId}-1",
                         'teamName' => $teamName,
                         'page' => $page,
                         'positions' => $position,
-                        'positionName' => $positionName,
                     ];
 
                 }
@@ -125,7 +125,7 @@ class MutGGThemeTeam extends Command
                 if (array_all($players[$playerPosition], fn ($currentPlayer) => $currentPlayer['playerId'] !== $player['player']['id'])) {
                     $relevantChems =
                         array_map(
-                            fn (array $chem) => strtoupper($chem['displaySlug']).' x'.$chem['count'],
+                            fn (array $chem) => ['chem' => $chem['displaySlug'], 'count' => $chem['count']],
                             array_filter(
                                 $player['availableChemistry'],
                                 fn (array $chem) => in_array($chem['externalId'], self::CHEMS)
@@ -138,10 +138,7 @@ class MutGGThemeTeam extends Command
                         'ovr' => $player['overall'],
                         'playerId' => $player['player']['id'] ?? null,
                         'positionId' => $playerPosition,
-                        'chems' => implode(
-                            ', ',
-                            $relevantChems
-                        ),
+                        'chems' => $relevantChems,
                     ];
                 }
             }
@@ -153,7 +150,9 @@ class MutGGThemeTeam extends Command
         $sortingPlayersProgressBar = $this->output->createProgressBar(count($players));
         $sortingPlayersProgressBar->start();
         foreach ($players as $positionPlayers) {
-            $positionPlayers = array_slice($positionPlayers, 0, 5);
+            $numPlayersAtPosition = self::POSITIONS[$positionPlayers[0]['positionId']];
+            usort($positionPlayers, fn (array $a, array $b) => $b['ovr'] <=> $a['ovr']);
+            $positionPlayers = array_slice($positionPlayers, 0, $numPlayersAtPosition);
             $resultPlayers = array_merge($resultPlayers, $positionPlayers);
         }
 
@@ -166,8 +165,97 @@ class MutGGThemeTeam extends Command
             return $posComp !== 0 ? $posComp : $ovrComp;
         });
 
-        $this->table(array_keys($resultPlayers[0]), $resultPlayers);
+        $this->drawTableForArray(array_map(
+            fn (array $player) => [
+                ...$player,
+                'chems' => implode(
+                    ', ',
+                    array_map(
+                        fn (array $chem) => strtoupper($chem['chem']).' x'.$chem['count'],
+                        $player['chems']
+                    )
+                ),
+            ],
+            $resultPlayers
+        ));
+
+        $allChems = array_map(
+            fn (array $player) => $player['chems'],
+            $resultPlayers
+        );
+        function array_cartesian_product($arrays)
+        {
+            $result = [];
+            $arrays = array_values($arrays);
+            $sizeIn = count($arrays);
+            $size = $sizeIn > 0 ? 1 : 0;
+            foreach ($arrays as $array) {
+                $size = $size * count($array);
+            }
+            for ($i = 0; $i < $size; $i++) {
+                $result[$i] = [];
+                for ($j = 0; $j < $sizeIn; $j++) {
+                    array_push($result[$i], current($arrays[$j]));
+                }
+                for ($j = ($sizeIn - 1); $j >= 0; $j--) {
+                    if (next($arrays[$j])) {
+                        break;
+                    } elseif (isset($arrays[$j])) {
+                        reset($arrays[$j]);
+                    }
+                }
+            }
+
+            return $result;
+        }
+
+        $chemCombos = array_unique(
+            array_map(
+                $this->sumChems(...),
+                array_cartesian_product($allChems)
+            ),
+            SORT_REGULAR
+        );
+        $chemComboHeaders = array_keys($chemCombos[array_key_first($chemCombos)]);
+
+        usort(
+            $chemCombos,
+            function (array $a, array $b) {
+                $distanceFrom20 = function (array $chem) {
+                    $distances = array_map(fn (int $i) => (20 - $i) ** 2, array_filter(array_values($chem)));
+
+                    return array_sum($distances) / count($distances);
+                };
+
+                return $distanceFrom20($a) <=> $distanceFrom20($b);
+            }
+        );
+
+        $csv = implode(',', $chemComboHeaders).PHP_EOL;
+        foreach ($chemCombos as $chemCombo) {
+            $csv .= implode(',', array_map(fn ($chem) => $chem ?? 0, $chemCombo)).PHP_EOL;
+        }
+        Storage::put('public/mut-gg-theme-team.csv', $csv);
 
         return self::SUCCESS;
+    }
+
+    private function drawTableForArray(array $array): void
+    {
+        $this->table(array_keys($array[array_key_first($array)]), $array);
+    }
+
+    private function sumChems(array $chems): array
+    {
+        $returnVal = [];
+        foreach ($chems as $chem) {
+            [
+                'chem' => $chemChem,
+                'count' => $chemCount,
+            ] = $chem;
+            $returnVal[$chemChem] = ($returnVal[$chemChem] ?? 0) + $chemCount;
+        }
+
+        return $returnVal;
     }
 }
