@@ -9,8 +9,10 @@ use Symfony\Component\DomCrawler\Crawler;
 class MutGGThemeTeam extends Command
 {
     private const string PLAYER_BASE_URL = 'https://www.mut.gg/players/';
+
     private const string API_URL = 'https://www.mut.gg/api/25';
-    private const string PLAYER_API_URL = self::API_URL . '/player-items';
+
+    private const string PLAYER_API_URL = self::API_URL.'/player-items';
 
     private const array CHEMS = [
         'seahawks' => '6280',
@@ -63,7 +65,7 @@ class MutGGThemeTeam extends Command
     public function handle(): int
     {
 
-        $coreData = Http::get(self::API_URL . '/core-data')->json()['data'];
+        $coreData = Http::get(self::API_URL.'/core-data')->json()['data'];
         $pages = [];
         foreach (self::CHEMS as $teamName => $chemId) {
             foreach (self::POSITIONS as $position => $positionName) {
@@ -94,13 +96,12 @@ class MutGGThemeTeam extends Command
             );
             $crawler = new Crawler($pagePlayers->body());
             $crawler = $crawler->filter('[data-external-id]');
-            $crawler->each(function (Crawler $node) use (&$playerIds, $page) {
+            $crawler->each(function (Crawler $node) use (&$playerIds) {
                 $playerId = $node->attr('data-external-id');
                 $playerIds[] = $playerId;
             });
-        };
+        }
         $gettingIdsProgressBar->finish();
-
 
         $players = [];
 
@@ -109,10 +110,10 @@ class MutGGThemeTeam extends Command
         $gettingPlayersProgressBar = $this->output->createProgressBar(count($chunkedIds));
         $gettingPlayersProgressBar->start();
 
-        foreach($chunkedIds as $chunk) {
+        foreach ($chunkedIds as $chunk) {
             $gettingPlayersProgressBar->advance();
             $implodedChunk = implode(',', $chunk);
-            $chunkPlayers =  Http::get(
+            $chunkPlayers = Http::get(
                 self::PLAYER_API_URL,
                 [
                     'ids' => $implodedChunk,
@@ -124,7 +125,7 @@ class MutGGThemeTeam extends Command
                 if (array_all($players[$playerPosition], fn ($currentPlayer) => $currentPlayer['playerId'] !== $player['player']['id'])) {
                     $relevantChems =
                         array_map(
-                            fn (array $chem) => strtoupper($chem['displaySlug']) . ' x' . $chem['count'],
+                            fn (array $chem) => strtoupper($chem['displaySlug']).' x'.$chem['count'],
                             array_filter(
                                 $player['availableChemistry'],
                                 fn (array $chem) => in_array($chem['externalId'], self::CHEMS)
@@ -132,7 +133,7 @@ class MutGGThemeTeam extends Command
                         );
                     sort($relevantChems);
                     $players[$playerPosition][] = [
-                        'name' => $player['firstName'] . ' ' . $player['lastName'],
+                        'name' => $player['firstName'].' '.$player['lastName'],
                         'position' => $player['position']['name'] ?? 'Unknown',
                         'ovr' => $player['overall'],
                         'playerId' => $player['player']['id'] ?? null,
@@ -140,7 +141,7 @@ class MutGGThemeTeam extends Command
                         'chems' => implode(
                             ', ',
                             $relevantChems
-                        )
+                        ),
                     ];
                 }
             }
@@ -161,9 +162,9 @@ class MutGGThemeTeam extends Command
         usort($resultPlayers, function ($a, $b) {
             $posComp = $a['positionId'] <=> $b['positionId'];
             $ovrComp = $b['ovr'] <=> $a['ovr'];
+
             return $posComp !== 0 ? $posComp : $ovrComp;
         });
-
 
         $this->table(array_keys($resultPlayers[0]), $resultPlayers);
 
