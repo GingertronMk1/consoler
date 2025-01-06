@@ -37,15 +37,18 @@ jobs:
             composer install --ignore-platform-reqs
       - name: Hoist Sail!
         run: ./vendor/bin/sail up -d
-      - name: Install
-        run: |
-          ./vendor/bin/sail composer install
-          ./vendor/bin/sail npm install
-          ./vendor/bin/sail npm run build
-          ./vendor/bin/sail artisan key:generate
-          ./vendor/bin/sail artisan migrate:fresh
+      - name: Composer Install
+        run: ./vendor/bin/sail composer install
+      - name: NPM Install
+        run: ./vendor/bin/sail npm install
+      - name: NPM Build
+        run: ./vendor/bin/sail npm run build
+      - name: Generate Key
+        run: ./vendor/bin/sail artisan key:generate
+      - name: Migrate
+        run: ./vendor/bin/sail artisan migrate:fresh
       - name: PHP Style
-        run: ./vendor/bin/sail composer pint -- --test
+        run: ./vendor/bin/sail composer pint:test
         if: always()
       - name: Test
         run: ./vendor/bin/sail artisan test --parallel --coverage
