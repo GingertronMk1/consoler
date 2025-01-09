@@ -4,7 +4,6 @@ namespace App\Console\Commands;
 
 use Illuminate\Console\Command;
 use Illuminate\Support\Facades\Http;
-use Illuminate\Support\Facades\Storage;
 use Symfony\Component\DomCrawler\Crawler;
 
 class MutGGThemeTeam extends Command
@@ -88,7 +87,7 @@ class MutGGThemeTeam extends Command
      *
      * @var string
      */
-    protected $signature = 'app:mut-g-g-theme-team';
+    protected $signature = 'app:mut-g-g-theme-team {--C|core-data}';
 
     /**
      * The console command description.
@@ -102,16 +101,22 @@ class MutGGThemeTeam extends Command
      */
     public function handle(): int
     {
-        //        $coreData = Http::get(self::API_URL.'/core-data')->json()['data'];
-        //        $chemDefs = [];
-        //        foreach ($coreData['chemistryDefs'] as $_chemistryDef) {
-        //            if ($_chemistryDef['chemistryType'] === 1) {
-        //                $chemDefs[$_chemistryDef['themeTeamSlug']] = $_chemistryDef['externalId'];
-        //            }
-        //        }
-        //
-        //        $this->line(var_export($chemDefs, true));
-        //        return 1;
+        if ($this->option('core-data') === true) {
+            $this->info('Getting core data');
+            $coreData = Http::get(self::API_URL.'/core-data')->json()['data'];
+            $chemDefs = [];
+            foreach ($coreData['chemistryDefs'] as $_chemistryDef) {
+                if ($_chemistryDef['chemistryType'] === 1) {
+                    $chemDefs[$_chemistryDef['themeTeamSlug']] = $_chemistryDef['externalId'];
+                }
+            }
+
+            ksort($chemDefs);
+
+            $this->line(var_export($chemDefs, true));
+
+            return 1;
+        }
         $pages = [];
         foreach (self::DESIRED_CHEMS as $slug) {
             $chemId = self::CHEMS[$slug];
@@ -174,7 +179,7 @@ class MutGGThemeTeam extends Command
                 if (array_all($players[$playerPosition], fn ($currentPlayer) => $currentPlayer['playerId'] !== $player['player']['id'])) {
                     $relevantChems =
                         array_map(
-                            fn (array $chem) => ['chem' => $chem['displaySlug'], 'count' => $chem['count']],
+                            fn (array $chem) => ['chem' => $chem['displaySlug'], 'count' => $chem['count'] ?? 1],
                             array_filter(
                                 $player['availableChemistry'],
                                 fn (array $chem) => in_array($chem['themeTeamSlug'], self::DESIRED_CHEMS)
@@ -188,6 +193,8 @@ class MutGGThemeTeam extends Command
                         'playerId' => $player['player']['id'] ?? null,
                         'positionId' => $playerPosition,
                         'chems' => $relevantChems,
+                        'programId' => $player['program']['id'] ?? null,
+                        'programName' => $player['program']['name'] ?? null,
                     ];
                 }
             }
@@ -204,42 +211,16 @@ class MutGGThemeTeam extends Command
             $numPlayersAtPosition = self::POSITIONS[$positionPlayers[0]['positionId']];
             usort($positionPlayers, fn (array $a, array $b) => $b['ovr'] <=> $a['ovr']);
             $positionPlayers = array_slice($positionPlayers, 0, $numPlayersAtPosition);
-            $resultPlayers = array_merge($resultPlayers, $positionPlayers);
+            foreach ($positionPlayers as $positionPlayer) {
+                $resultPlayers[] = $this->expandPositionPlayer($positionPlayer);
+            }
         }
 
         $sortingPlayersProgressBar->finish();
         $this->newLine();
 
-        usort($resultPlayers, function ($a, $b) {
-            $posComp = $a['positionId'] <=> $b['positionId'];
-            $ovrComp = $b['ovr'] <=> $a['ovr'];
-
-            return $posComp !== 0 ? $posComp : $ovrComp;
-        });
-
-        $this->drawTableForArray(array_map(
-            fn (array $player) => [
-                ...$player,
-                'chems' => implode(
-                    ', ',
-                    array_map(
-                        fn (array $chem) => strtoupper($chem['chem']).' x'.$chem['count'],
-                        $player['chems']
-                    )
-                ),
-            ],
-            $resultPlayers
-        ));
-
-        $allChems = array_map(
-            fn (array $player) => $player['chems'],
-            $resultPlayers
-        );
         $chemCombos = array_unique(
-            array_map(
-                $this->sumChems(...),
-                $this->getChemCombos($allChems)
-            ),
+            $this->getChemCombos($resultPlayers),
             SORT_REGULAR
         );
 
@@ -248,47 +229,76 @@ class MutGGThemeTeam extends Command
             $this->sortChemCombos(...)
         );
 
-        $chemComboHeaders = array_keys($chemCombos[array_key_first($chemCombos)]);
-
-        if (self::OUTPUT_CSV) {
-            $csv = implode(',', $chemComboHeaders).PHP_EOL;
-            foreach ($chemCombos as $chemCombo) {
-                $csv .= implode(',', array_map(fn ($chem) => $chem ?? 0, $chemCombo)).PHP_EOL;
-            }
-            Storage::put('public/mut-gg-theme-team.csv', $csv);
-        }
-
-        $chemComboInfoLine = [];
         $bestCombo = array_shift($chemCombos);
-        foreach ($bestCombo as $chem => $count) {
-            $chemComboInfoLine[] = "{$chem} x{$count}";
+
+        usort(
+            $bestCombo,
+            function (array $playerA, array $playerB) {
+                $positionId = $playerA['positionId'] <=> $playerB['positionId'];
+                if ($positionId !== 0) {
+                    return $positionId;
+                }
+
+                return $playerB['ovr'] <=> $playerA['ovr'];
+            }
+        );
+
+        $this->drawTableForArray(
+            array_map(
+                function (array $player) {
+                    $ret = $player;
+                    $ret['chem'] = sprintf('%s x%d', strtoupper($player['chem']['chem']), $player['chem']['count']);
+
+                    return $ret;
+                },
+                $bestCombo
+            ),
+            [
+                'playerId',
+                'positionId',
+                'programId',
+            ]
+        );
+
+        $bestComboChems = [];
+        foreach ($bestCombo as $player) {
+            [
+                'chem' => $chemChem,
+                'count' => $chemCount,
+            ] = $player['chem'];
+            $currentCount = $bestComboChems[$chemChem] ?? 0;
+            $bestComboChems[$player['chem']['chem']] = $currentCount + $chemCount;
         }
 
-        $this->getOutput()->listing($chemComboInfoLine);
+        $bestComboChemsListing = [];
+        foreach ($bestComboChems as $chem => $count) {
+            $bestComboChemsListing[] = ['chem' => $chem, 'count' => $count];
+        }
+
+        $this->drawTableForArray($bestComboChemsListing);
 
         return self::SUCCESS;
     }
 
-    private function drawTableForArray(array $array): void
+    private function drawTableForArray(array $array, array $ignoreKeys = []): void
     {
-        $this->table(array_keys($array[array_key_first($array)]), $array);
+        $keys = array_keys($array[array_key_first($array)]);
+        $keys = array_diff($keys, $ignoreKeys);
+        $tableVals = array_map(
+            function (array $item) use ($keys) {
+                $newItem = [];
+                foreach ($keys as $key) {
+                    $newItem[$key] = $item[$key] ?? null;
+                }
+
+                return $newItem;
+            },
+            $array
+        );
+        $this->table($keys, $tableVals);
     }
 
-    private function sumChems(array $chems): array
-    {
-        $returnVal = [];
-        foreach ($chems as $chem) {
-            [
-                'chem' => $chemChem,
-                'count' => $chemCount,
-            ] = $chem;
-            $returnVal[$chemChem] = ($returnVal[$chemChem] ?? 0) + $chemCount;
-        }
-
-        return $returnVal;
-    }
-
-    private function getChemCombos(array $arrays)
+    private function getChemCombos(array $arrays): array
     {
         $result = [];
         $arrays = array_values($arrays);
@@ -303,7 +313,7 @@ class MutGGThemeTeam extends Command
         for ($i = 0; $i < $size; $i++) {
             $result[$i] = [];
             for ($j = 0; $j < $sizeIn; $j++) {
-                array_push($result[$i], current($arrays[$j]));
+                $result[$i][] = current($arrays[$j]);
             }
             for ($j = ($sizeIn - 1); $j >= 0; $j--) {
                 if (next($arrays[$j])) {
@@ -322,12 +332,36 @@ class MutGGThemeTeam extends Command
 
     private function sortChemCombos(array $a, array $b): int
     {
-        $distanceFrom20 = function (array $chem) {
+        $distanceFrom20 = function (array $players) {
+            $chem = [];
+            foreach ($players as $player) {
+                [
+                    'chem' => $chemChem,
+                    'count' => $chemCount,
+                ] = $player['chem'];
+                $chem[$chemChem] = ($chem[$chemChem] ?? 0) + $chemCount;
+            }
+
             $distances = array_map(fn (int $i) => (20 - $i) ** 2, array_filter(array_values($chem)));
 
             return array_sum($distances) / count($distances);
         };
 
         return $distanceFrom20($a) <=> $distanceFrom20($b);
+    }
+
+    private function expandPositionPlayer(array $player): array
+    {
+        $returnVal = [];
+        foreach ($player['chems'] as $chem) {
+            $chemmedPlayer = [
+                ...$player,
+                'chem' => $chem,
+            ];
+            unset($chemmedPlayer['chems']);
+            $returnVal[] = $chemmedPlayer;
+        }
+
+        return $returnVal;
     }
 }
