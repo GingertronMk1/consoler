@@ -5,6 +5,7 @@ namespace App\Console\Commands;
 use Illuminate\Console\Command;
 use Illuminate\Support\Facades\Http;
 use Symfony\Component\DomCrawler\Crawler;
+use function Laravel\Prompts\multiselect;
 
 class MutGGThemeTeam extends Command
 {
@@ -49,15 +50,6 @@ class MutGGThemeTeam extends Command
         'tampa-bay-buccaneers' => 6060,
         'tennessee-titans' => 6300,
         'washington-commanders' => 6260,
-    ];
-
-    private const array DESIRED_CHEMS = [
-//        'seattle-seahawks',
-//        'philadelphia-eagles',
-        'new-england-patriots',
-        'kansas-city-chiefs',
-        'baltimore-ravens',
-        'houston-texans',
     ];
 
     private const array POSITIONS = [
@@ -119,8 +111,15 @@ class MutGGThemeTeam extends Command
 
             return 1;
         }
+
+        $teams = multiselect(
+            label: 'What teams do you want?',
+            options: array_keys(self::CHEMS),
+        );
+
+        $this->getOutput()->listing($teams);
         $pages = [];
-        foreach (self::DESIRED_CHEMS as $slug) {
+        foreach ($teams as $slug) {
             $chemId = self::CHEMS[$slug];
             foreach (array_keys(self::POSITIONS) as $position) {
                 for ($page = 1; $page < 2; $page++) {
@@ -184,7 +183,7 @@ class MutGGThemeTeam extends Command
                             fn (array $chem) => ['chem' => $chem['displaySlug'], 'count' => $chem['count'] ?? 1],
                             array_filter(
                                 $player['availableChemistry'],
-                                fn (array $chem) => in_array($chem['themeTeamSlug'], self::DESIRED_CHEMS)
+                                fn (array $chem) => in_array($chem['themeTeamSlug'], $teams)
                             )
                         );
                     sort($relevantChems);
