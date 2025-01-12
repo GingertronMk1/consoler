@@ -1,0 +1,30 @@
+#!/usr/bin/env sh
+
+echo "Copy env file"
+cp -v .env.example .env
+
+echo "Bootstrap some PHP so we can set Sail"
+docker run --rm \
+  -u "$(id -u):$(id -g)" \
+  -v "$(pwd):/var/www/html" \
+  -w /var/www/html laravelsail/php84-composer:latest \
+  composer install --ignore-platform-reqs
+
+echo "Hoist Sail!"
+./vendor/bin/sail up -d
+
+echo "Composer Install"
+./vendor/bin/sail composer install
+
+echo "NPM Install"
+./vendor/bin/sail npm install
+
+echo "NPM Build"
+./vendor/bin/sail npm run build
+
+echo "Generate Key"
+./vendor/bin/sail artisan key:generate
+
+echo "Migrate"
+./vendor/bin/sail artisan migrate:fresh
+
