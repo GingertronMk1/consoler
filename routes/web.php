@@ -24,4 +24,7 @@ Route::middleware('auth')->group(function () {
     Route::delete('/profile', [ProfileController::class, 'destroy'])->name('profile.destroy');
 });
 
+Route::get('/mut-gg', \App\Http\Controllers\MutGGThemeTeamController::class);
+Route::get('/run', \App\Http\Controllers\RunController::class)->name('run');
+
 require __DIR__.'/auth.php';

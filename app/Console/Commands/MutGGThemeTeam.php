@@ -5,6 +5,7 @@ namespace App\Console\Commands;
 use Illuminate\Console\Command;
 use Illuminate\Support\Facades\Http;
 use Symfony\Component\DomCrawler\Crawler;
+
 use function Laravel\Prompts\multiselect;
 
 class MutGGThemeTeam extends Command
@@ -17,7 +18,7 @@ class MutGGThemeTeam extends Command
 
     private const string PLAYER_API_URL = self::API_URL.'/player-items';
 
-    private const array CHEMS = [
+    public const array CHEMS = [
         'arizona-cardinals' => 6070,
         'atlanta-falcons' => 6140,
         'baltimore-ravens' => 6250,
@@ -81,7 +82,7 @@ class MutGGThemeTeam extends Command
      *
      * @var string
      */
-    protected $signature = 'app:mut-g-g-theme-team {--C|core-data}';
+    protected $signature = 'app:mut-g-g-theme-team {--C|core-data} {teams?*}';
 
     /**
      * The console command description.
@@ -112,12 +113,17 @@ class MutGGThemeTeam extends Command
             return 1;
         }
 
-        $teams = multiselect(
-            label: 'What teams do you want?',
-            options: array_keys(self::CHEMS),
-        );
+        $teams = $this->argument('teams');
 
-        $this->getOutput()->listing($teams);
+        while (empty($teams)) {
+            $teams = multiselect(
+                label: 'What teams do you want?',
+                options: array_keys(self::CHEMS),
+            );
+
+            $this->getOutput()->listing($teams);
+        }
+
         $pages = [];
         foreach ($teams as $slug) {
             $chemId = self::CHEMS[$slug];
@@ -364,5 +370,10 @@ class MutGGThemeTeam extends Command
         }
 
         return $returnVal;
+    }
+
+    public static function getTeams(): array
+    {
+        return array_keys(self::CHEMS);
     }
 }
